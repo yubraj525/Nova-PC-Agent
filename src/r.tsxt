@@ -1,0 +1,56 @@
+import {WebSocketServer} from "ws";
+import { ToolRegistry } from "./core/toolsregistry.js";
+import { ToolRouter } from "./core/toolsrouter.js";
+import { OpenApplicationTool } from "./tools/openApplication.js";
+import { BrowserSearchTool } from "./tools/BrowserSearchTool.js";
+import { OpenBrowserTool } from "./tools/OpenBrowserTool.js";
+import { ProcessManager } from "./process/ProcessManager.js";
+const wss = new WebSocketServer({ port: 8080 });
+
+wss.on("connection", (ws) => {
+  console.log("New client connected");
+});
+
+async function main() {
+  const processManager = new ProcessManager();
+  await processManager.initialize();
+  console.log("\nRunning applications:");
+    console.log(
+        processManager.listRunningProcesses().map(process => ({
+            id: process.id,
+            pid: process.pid,
+            name: process.name,
+            status: process.status
+        }))
+    );
+    const registry = new ToolRegistry();
+
+    registry.register(
+        new OpenApplicationTool(processManager),
+        
+    );
+   
+    registry.register(
+        new OpenBrowserTool()
+    );
+
+    const router = new ToolRouter(registry);
+
+  const result = await router.execute(
+        "open_application",
+        {
+            application: "Notepad"
+        }
+    );
+
+
+    console.log("Tool result:");
+    console.log(result);
+
+}
+
+
+main().catch(error => {
+    console.error("NOVA PC Agent failed:");
+    console.error(error);
+});
