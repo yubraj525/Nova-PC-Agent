@@ -1,138 +1,273 @@
-import { spawn } from "child_process";
-import { EventEmitter } from "events";
+import { ChildProcess, spawn } from "child_process";
+import crypto from "crypto";
+
 import { applications } from "../cofig/applicationRegistry";
-import { DiscoveredProcess, ProcessDiscovery } from "./ProcessDiscovery";
+import {
+    ProcessDiscovery,
+    DiscoveredProcess
+} from "./ProcessDiscovery";
 
 export interface ManagedProcess {
-  id: string;
-  /** PID of the real application executable, never the launcher PID. */
-  pid: number;
-  name: string;
-  status: "running" | "stopped";
+    id: string;
+    name: string;
+    executable: string;
+
+    pid: number;
+    parentPid?: number;
+
+    status: "running" | "stopped";
+
+    executablePath?: string;
+    commandLine?: string;
+    creationTime?: string;
+
+    process?: ChildProcess;
 }
 
-export class ProcessManager extends EventEmitter {
-  private processes = new Map<string, ManagedProcess>();
-  private discovery = new ProcessDiscovery();
+export class ProcessManager {
 
-  /**
-   * Launch an app, resolve its actual executable PID, then watch that PID.
-   * Launcher/stub exit is intentionally ignored for application status.
-   */
-  async start(name: string, command: string, executable: string, args: string[] = []): Promise<ManagedProcess> {
-    const pidsBeforeLaunch = await this.discovery.findPidsByExecutable(executable);
-    const launcher = spawn(command, args, { detached: false, stdio: "ignore" });
+    private processes = new Map<string, ManagedProcess>();
 
-    if (launcher.pid === undefined) throw new Error(`Failed to launch '${name}'`);
+    private discovery = new ProcessDiscovery();
 
-    launcher.on("exit", (code, signal) => {
-      console.log(`Launcher for '${name}' exited: pid=${launcher.pid}, code=${code}, signal=${signal}`);
-    });
-    launcher.on("error", (error) => console.error(`Launcher for '${name}' failed:`, error));
+    async initialize(): Promise<void> {
 
-    const pid = await this.resolveApplicationPid(executable, pidsBeforeLaunch);
-    return this.observe(name, pid);
-  }
+        console.log("Initializing ProcessManager...");
 
-  /** Track an already-known real application PID. */
-  observe(name: string, pid: number): ManagedProcess {
-    if (!Number.isInteger(pid) || pid <= 0) throw new Error(`Invalid PID '${pid}'`);
+        const discovered =
+            await this.discovery.discoverAll();
 
-    const existing = this.list().find(
-      (managedProcess) => managedProcess.pid === pid && managedProcess.status === "running",
-    );
-    if (existing) return existing;
+        for (const process of discovered) {
 
-    const processInfo: ManagedProcess = { id: crypto.randomUUID(), pid, name, status: "running" };
-    this.processes.set(processInfo.id, processInfo);
-    this.watchActualProcess(processInfo);
-    return processInfo;
-  }
+            const application =
+                Object.entries(applications).find(
+                    ([, executable]) =>
+                        executable.toLowerCase() ===
+                        process.name.toLowerCase()
+                );
 
-  get(id: string): ManagedProcess | undefined {
-    return this.processes.get(id);
-  }
+            if (!application) {
+                continue;
+            }
 
-  list(): ManagedProcess[] {
-    return Array.from(this.processes.values());
-  }
+            const managedProcess =
+                this.createManagedProcess(process);
 
-  listRunningProcesses(): ManagedProcess[] {
-    return this.list().filter((managedProcess) => managedProcess.status === "running");
-  }
+            this.processes.set(
+                managedProcess.id,
+                managedProcess
+            );
+        }
 
-  stop(id: string): void {
-    const processInfo = this.processes.get(id);
-    if (!processInfo) throw new Error(`Process '${id}' not found`);
-
-    // Kill the real application PID. Its watcher updates status after OS exit.
-    process.kill(processInfo.pid);
-  }
-
-  async discoverRunningApplications(): Promise<DiscoveredProcess[]> {
-    return this.discovery.discover(applications);
-  }
-
-  async initialize(): Promise<void> {
-    const discovered = await this.discovery.discover(applications);
-    for (const process of discovered) this.observe(process.name, process.pid);
-  }
-
-  private async resolveApplicationPid(executable: string, pidsBeforeLaunch: number[]): Promise<number> {
-    const knownPids = new Set(pidsBeforeLaunch);
-
-    // Retries are used only for launch-time PID resolution. Exit monitoring below
-    // waits on a Windows process handle and never polls tasklist.
-    for (let attempt = 0; attempt < 40; attempt += 1) {
-      const pids = await this.discovery.findPidsByExecutable(executable);
-      const newPid = pids.find((pid) => !knownPids.has(pid));
-      if (newPid !== undefined) return newPid;
-      await new Promise<void>((resolve) => setTimeout(resolve, 50));
+        console.log(
+            `Discovered ${this.processes.size} managed process(es).`
+        );
     }
 
-    // A single-instance app may forward launch to its existing process.
-    if (pidsBeforeLaunch.length === 1) return pidsBeforeLaunch[0];
-    throw new Error(`Could not resolve the real '${executable}' PID after launch`);
-  }
+    private createManagedProcess(
+        process: DiscoveredProcess
+    ): ManagedProcess {
 
-  /** Wait on the actual Windows PID. This is OS-event-driven, not polling. */
-  private watchActualProcess(processInfo: ManagedProcess): void {
-    if (process.platform !== "win32") return;
+        const application =
+            Object.entries(applications).find(
+                ([, executable]) =>
+                    executable.toLowerCase() ===
+                    process.name.toLowerCase()
+            );
 
-    const script = [
-      `$ProcessId = ${processInfo.pid}`,
-      "try {",
-      "  $target = [System.Diagnostics.Process]::GetProcessById($ProcessId)",
-      "  $target.EnableRaisingEvents = $true",
-      "  $target.WaitForExit()",
-      "  [Console]::Out.WriteLine('exited')",
-      "} catch [System.ArgumentException] {",
-      "  [Console]::Out.WriteLine('not-found')",
-      "} catch {",
-      "  [Console]::Out.WriteLine('watcher-error')",
-      "  [Console]::Error.WriteLine($_.Exception.Message)",
-      "  exit 1",
-      "}",
-    ].join("\n");
+        if (!application) {
+            throw new Error(
+                `Unknown application '${process.name}'`
+            );
+        }
 
-    const watcher = spawn("powershell.exe", [
-      "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script,
-    ], { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+        return {
+            id: crypto.randomUUID(),
 
-    let result = "watcher-error";
-    watcher.stdout.on("data", (chunk: Buffer) => { result = chunk.toString().trim() || result; });
-    watcher.stderr.on("data", (chunk: Buffer) => console.error(`PID ${processInfo.pid} watcher: ${chunk}`));
-    watcher.on("error", (error) => console.error(`Could not watch PID ${processInfo.pid}:`, error));
-    watcher.on("close", () => this.onActualProcessClosed(processInfo.id, result));
-  }
+            name: application[0],
 
-  /** Called only by the watcher for the real application PID. */
-  private onActualProcessClosed(id: string, reason: string): void {
-    const processInfo = this.processes.get(id);
-    if (!processInfo || processInfo.status === "stopped") return;
+            executable: application[1],
 
-    processInfo.status = "stopped";
-    console.log(`Application closed: '${processInfo.name}', pid=${processInfo.pid}, reason=${reason}`);
-    this.emit("processClosed", processInfo);
-  }
+            pid: process.pid,
+
+            parentPid: process.parentPid,
+
+            status: "running",
+
+            executablePath: process.executablePath,
+
+            commandLine: process.commandLine,
+
+            creationTime: process.creationTime
+        };
+    }
+
+    async start(
+        name: string,
+        args: string[] = []
+    ): Promise<ManagedProcess> {
+
+        const applicationName =
+            name.toLowerCase();
+
+        const executable =
+            applications[applicationName];
+
+        if (!executable) {
+            throw new Error(
+                `Application '${name}' is not supported`
+            );
+        }
+
+        const existing =
+            await this.findRunning(
+                applicationName
+            );
+
+        if (existing) {
+            return existing;
+        }
+
+        const child =
+            spawn(
+                executable,
+                args,
+                {
+                    detached: false,
+                    stdio: "ignore"
+                }
+            );
+
+        if (child.pid === undefined) {
+            throw new Error(
+                `Failed to start '${name}'`
+            );
+        }
+
+        const launcherPid =
+            child.pid;
+
+        console.log(
+            `Launcher PID: ${launcherPid}`
+        );
+
+        child.unref();
+
+        const actualProcess =
+            await this.discovery.findChildProcess(
+                launcherPid,
+                executable
+            );
+
+        if (actualProcess) {
+
+            console.log(
+                `Actual process found: PID=${actualProcess.pid}`
+            );
+
+            const processInfo =
+                this.createManagedProcess(
+                    actualProcess
+                );
+
+            this.processes.set(
+                processInfo.id,
+                processInfo
+            );
+
+            return processInfo;
+        }
+
+        const processInfo: ManagedProcess = {
+            id: crypto.randomUUID(),
+
+            name: applicationName,
+
+            executable,
+
+            pid: launcherPid,
+
+            status: "running",
+
+            process: child
+        };
+
+        this.processes.set(
+            processInfo.id,
+            processInfo
+        );
+
+        return processInfo;
+    }
+
+    private async findRunning(
+        name: string
+    ): Promise<ManagedProcess | undefined> {
+
+        const existing =
+            Array.from(
+                this.processes.values()
+            ).find(
+                process =>
+                    process.name === name &&
+                    process.status === "running"
+            );
+
+        if (existing) {
+            return existing;
+        }
+
+        const executable =
+            applications[name];
+
+        if (!executable) {
+            return undefined;
+        }
+
+        const discovered =
+            await this.discovery.findByExecutable(
+                executable
+            );
+
+        const found =
+            discovered[0];
+
+        if (!found) {
+            return undefined;
+        }
+
+        const managedProcess =
+            this.createManagedProcess(
+                found
+            );
+
+        this.processes.set(
+            managedProcess.id,
+            managedProcess
+        );
+
+        return managedProcess;
+    }
+
+    get(
+        id: string
+    ): ManagedProcess | undefined {
+
+        return this.processes.get(id);
+    }
+
+    list(): ManagedProcess[] {
+
+        return Array.from(
+            this.processes.values()
+        );
+    }
+
+    listRunning(): ManagedProcess[] {
+
+        return this.list().filter(
+            process =>
+                process.status === "running"
+        );
+    }
 }

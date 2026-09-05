@@ -8,115 +8,80 @@ import { OpenBrowserTool } from "./tools/OpenBrowserTool.js";
 
 import { ProcessManager } from "./process/ProcessManager.js";
 
-
 async function main() {
+  console.log("Starting NOVA PC Agent...");
 
-    console.log("Starting NOVA PC Agent...");
+  // --------------------------------------------------
+  // 1. Process Manager
+  // --------------------------------------------------
 
+  const processManager = new ProcessManager();
+  await processManager.initialize?.();
 
-    // --------------------------------------------------
-    // 1. Process Manager
-    // --------------------------------------------------
+  console.log("\nInitial running applications:");
 
-    const processManager = new ProcessManager();
+  // --------------------------------------------------
+  // 2. Tool Registry
+  // --------------------------------------------------
 
-    await processManager.initialize();
+  const registry = new ToolRegistry();
 
-    console.log("\nInitial running applications:");
+  // --------------------------------------------------
+  // 3. Register Tools
+  // --------------------------------------------------
 
-    console.log(
-        processManager.listRunningProcesses().map(process => ({
-            id: process.id,
-            pid: process.pid,
-            name: process.name,
-            status: process.status
-        }))
-    );
+  registry.register(new OpenApplicationTool(processManager));
 
+  registry.register(new OpenBrowserTool());
 
-    // --------------------------------------------------
-    // 2. Tool Registry
-    // --------------------------------------------------
+  // --------------------------------------------------
+  // 4. Tool Router
+  // --------------------------------------------------
 
-    const registry = new ToolRegistry();
+  const router = new ToolRouter(registry);
 
+  // --------------------------------------------------
+  // 5. WebSocket Server
+  // --------------------------------------------------
 
-    // --------------------------------------------------
-    // 3. Register Tools
-    // --------------------------------------------------
+  const wss = new WebSocketServer({
+    port: 8080,
+  });
 
-    registry.register(
-        new OpenApplicationTool(processManager)
-    );
+  wss.on("connection", (ws) => {
+    console.log("NOVA client connected");
 
-    registry.register(
-        new OpenBrowserTool()
-    );
+    ws.on("message", async (message) => {
+      console.log("Received:", message.toString());
 
-
-    // --------------------------------------------------
-    // 4. Tool Router
-    // --------------------------------------------------
-
-    const router = new ToolRouter(registry);
-
-
-    // --------------------------------------------------
-    // 5. WebSocket Server
-    // --------------------------------------------------
-
-    const wss = new WebSocketServer({
-        port: 8080
+      // WebSocket command handling will come here later.
+      // For now we only receive the connection/message.
     });
 
-
-    wss.on("connection", (ws) => {
-
-        console.log("NOVA client connected");
-
-        ws.on("message", async (message) => {
-
-            console.log("Received:", message.toString());
-
-            // WebSocket command handling will come here later.
-            // For now we only receive the connection/message.
-        });
-
-
-        ws.on("close", () => {
-
-            console.log("NOVA client disconnected");
-
-        });
-
+    ws.on("close", () => {
+      console.log("NOVA client disconnected");
     });
-    const result = await router.execute(
-    "open_application",
-    {
-        application: "notepad"
-    }
-);
+  });
+  const result = await router.execute("open_application", {
+    application: "notepad",
+  });
 
-console.log("Tool result:");
-console.log(result);
+  console.log("Tool result:");
+  console.log(result);
 
-const result2 = await processManager.discoverRunningApplications();
+//   const result2 = await processManager.listRunning();
 
-console.log("Tool result 2:");
-console.log(result2);
+//   console.log("Tool result 2:");
+//   console.log(result2);
 
-
-    console.log("\n--------------------------------");
-    console.log("NOVA PC Agent is running");
-    console.log("WebSocket: ws://localhost:8080");
-    console.log("--------------------------------\n");
+  console.log("\n--------------------------------");
+  console.log("NOVA PC Agent is running");
+  console.log("WebSocket: ws://localhost:8080");
+  console.log("--------------------------------\n");
 }
 
+main().catch((error) => {
+  console.error("NOVA PC Agent failed:");
 
-main().catch(error => {
-
-    console.error("NOVA PC Agent failed:");
-
-    console.error(error);
-
+  console.error(error);
 });

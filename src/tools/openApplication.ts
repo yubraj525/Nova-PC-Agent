@@ -26,9 +26,8 @@ export class OpenApplicationTool {
         }
 
         const process = await this.processManager.start(
-            application,
-            executable,
-            executable,
+            application
+            
         );
 
         return {
