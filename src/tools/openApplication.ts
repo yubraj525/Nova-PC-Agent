@@ -1,4 +1,5 @@
 import { ProcessManager } from "../process/ProcessManager";
+import { applications } from "../cofig/applicationRegistry";
 
 export class OpenApplicationTool {
 
@@ -18,9 +19,16 @@ export class OpenApplicationTool {
             throw new Error("application must be a string");
         }
 
-        const process = this.processManager.start(
+        const executable = applications[application.toLowerCase()];
+
+        if (!executable) {
+            throw new Error(`Unsupported application '${application}'`);
+        }
+
+        const process = await this.processManager.start(
             application,
-            `${application}.exe`
+            executable,
+            executable,
         );
 
         return {
