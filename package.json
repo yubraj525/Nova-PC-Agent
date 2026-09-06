@@ -13,7 +13,8 @@
   "packageManager": "pnpm@10.29.3",
   "dependencies": {
     "playwright": "^1.63.0",
-    "ws": "^8.21.3"
+    "ws": "^8.21.3",
+    "zod": "^4.5.4"
   },
   "devDependencies": {
     "@types/node": "^26.4.1",

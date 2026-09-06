@@ -1,11 +1,16 @@
 import type { Tools } from "../../core/Tools.js";
 import { BrowserManager } from "../../browser/browserManager.js";
-
+import { z } from "zod";
 export class BrowserFillTool implements Tools {
   name = "browser_fill";
 
   description =
     "Fill a textbox or input element with text using its element ID.";
+  schema: z.ZodType = z.object({
+    tabId: z.string().describe("The ID of the browser tab."),
+    elementId: z.string().describe("The ID of the element to fill."),
+    value: z.string().describe("The text value to fill into the input element."),
+  });
 
   constructor(
     private browserManager: BrowserManager

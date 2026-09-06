@@ -1,11 +1,15 @@
 import type { Tools } from "../../core/Tools.js";
 import { BrowserManager } from "../../browser/browserManager.js";
-
+import { z } from "zod";
 export class BrowserNavigateTool implements Tools {
   name = "browser_navigate";
 
   description =
     "Navigate an existing browser tab to a specified URL.";
+  schema: z.ZodType = z.object({
+    tabId: z.string().describe("The ID of the browser tab."),
+    url: z.string().describe("The URL to navigate to."),
+  });
 
   constructor(
     private browserManager: BrowserManager

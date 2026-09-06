@@ -1,12 +1,15 @@
 import { ProcessManager } from "../process/ProcessManager";
 import { applications } from "../cofig/applicationRegistry";
 import { Tools } from "../core/Tools";
-
+import { z } from "zod";
 export class OpenApplicationTool implements Tools {
 
     name = "open_application";
 
     description = "Open an application on the Windows computer.";
+    schema: z.ZodType = z.object({
+        application: z.string().describe("The name of the application to open."),
+    });
 
     constructor(
         private processManager: ProcessManager

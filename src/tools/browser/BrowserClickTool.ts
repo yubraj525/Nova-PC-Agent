@@ -1,11 +1,16 @@
 import type { Tools } from "../../core/Tools.js";
 import { BrowserManager } from "../../browser/browserManager.js";
+import { z } from "zod";
 
 export class BrowserClickTool implements Tools {
   name = "browser_click";
 
   description =
     "Click an interactive element on a browser page using its element ID.";
+  schema: z.ZodType = z.object({
+    tabId: z.string().describe("The ID of the browser tab."),
+    elementId: z.string().describe("The ID of the element to click."),
+  });
 
   constructor(
     private browserManager: BrowserManager

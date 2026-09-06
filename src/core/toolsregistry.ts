@@ -1,5 +1,5 @@
 import { Tools } from "./Tools";
-
+import { z } from "zod";
 export class ToolRegistry {
 
     private tools: Map<string, Tools> = new Map();
@@ -22,4 +22,12 @@ export class ToolRegistry {
     listTools(): Tools[] {
         return Array.from(this.tools.values());
     }
+
+    getToolSchemas() {
+    return this.listTools().map((tool) => ({
+        name: tool.name,
+        description: tool.description,
+        parameters: z.toJSONSchema(tool.schema),
+    }));
+}
 }
