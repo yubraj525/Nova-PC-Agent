@@ -187,12 +187,12 @@ export class BrowserManager {
 
   async fillInput(
     tabId: string,
-    selector: string,
+    elementId: string,
     value: string,
   ): Promise<void> {
     const tab = this.getTab(tabId);
 
-    const input = tab.page.locator(selector);
+    const input = tab.page.locator(`[data-nova-element-id="${elementId}"]`);
 
     await input.waitFor({
       state: "visible",
@@ -203,12 +203,12 @@ export class BrowserManager {
 
   async pressKeyOn(
     tabId: string,
-    selector: string,
+    elementId: string,
     key: string,
   ): Promise<void> {
     const tab = this.getTab(tabId);
 
-    const element = tab.page.locator(selector);
+    const element = tab.page.locator(`[data-nova-element-id="${elementId}"]`);
 
     await element.waitFor({
       state: "visible",
@@ -217,10 +217,16 @@ export class BrowserManager {
     await element.press(key);
   }
 
-  async click(tabId: string, selector: string): Promise<void> {
+  async click(tabId: string, elementId: string): Promise<void> {
     const tab = this.getTab(tabId);
 
-    await tab.page.locator(selector).click();
+    const element = tab.page.locator(`[data-nova-element-id="${elementId}"]`);
+
+    await element.waitFor({
+      state: "visible",
+    });
+
+    await element.click();
   }
 
   async getPageText(tabId: string): Promise<string> {
@@ -287,126 +293,158 @@ export class BrowserManager {
 
     return await this.navigateTab(tabId, result.url);
   }
-  async getInteractiveElements(tabId: string): Promise<BrowserElement[]> {
+  async getInteractiveElements(
+    tabId: string,
+    role?: BrowserElement["role"],
+    limit: number = 5,
+  ): Promise<BrowserElement[]> {
     const tab = this.getTab(tabId);
 
     return await tab.page
       .locator("a, button, input, textarea, select")
-      .evaluateAll((elements) => {
-        const results: BrowserElement[] = [];
+      .evaluateAll(
+        (elements, options) => {
+          const results: BrowserElement[] = [];
 
-        for (const element of elements) {
-          const rect = element.getBoundingClientRect();
-          const style = window.getComputedStyle(element);
+          for (const element of elements) {
+            const rect = element.getBoundingClientRect();
+            const style = window.getComputedStyle(element);
 
-          // 1. Ignore invisible elements
-          const visible =
-            rect.width > 0 &&
-            rect.height > 0 &&
-            style.display !== "none" &&
-            style.visibility !== "hidden" &&
-            style.opacity !== "0";
+            // 1. Ignore invisible elements
+            const visible =
+              rect.width > 0 &&
+              rect.height > 0 &&
+              style.display !== "none" &&
+              style.visibility !== "hidden" &&
+              style.opacity !== "0";
 
-          if (!visible) continue;
+            if (!visible) continue;
 
-          // 2. Ignore disabled elements
-          const disabled =
-            element instanceof HTMLButtonElement ||
-            element instanceof HTMLInputElement ||
-            element instanceof HTMLSelectElement ||
-            element instanceof HTMLTextAreaElement
-              ? element.disabled
-              : false;
+            // 2. Ignore disabled elements
+            const disabled =
+              element instanceof HTMLButtonElement ||
+              element instanceof HTMLInputElement ||
+              element instanceof HTMLSelectElement ||
+              element instanceof HTMLTextAreaElement
+                ? element.disabled
+                : false;
 
-          if (disabled) continue;
+            if (disabled) continue;
 
-          const tag = element.tagName.toLowerCase();
+            const tag = element.tagName.toLowerCase();
 
-          // 3. Ignore file inputs for now
-          if (element instanceof HTMLInputElement && element.type === "file") {
-            continue;
-          }
-
-          // 4. Determine role
-          let role: BrowserElement["role"];
-          let actions: string[];
-
-          switch (tag) {
-            case "a":
-              role = "link";
-              actions = ["click"];
-              break;
-
-            case "button":
-              role = "button";
-              actions = ["click"];
-              break;
-
-            case "input":
-            case "textarea":
-              role = "textbox";
-              actions = ["fill", "press"];
-              break;
-
-            case "select":
-              role = "select";
-              actions = ["select"];
-              break;
-
-            default:
+            // 3. Ignore file inputs
+            if (
+              element instanceof HTMLInputElement &&
+              element.type === "file"
+            ) {
               continue;
+            }
+
+            // 4. Determine role
+            let currentRole: BrowserElement["role"];
+            let actions: string[];
+
+            switch (tag) {
+              case "a":
+                currentRole = "link";
+                actions = ["click"];
+                break;
+
+              case "button":
+                currentRole = "button";
+                actions = ["click"];
+                break;
+
+              case "input":
+              case "textarea":
+                currentRole = "textbox";
+                actions = ["fill", "press"];
+                break;
+
+              case "select":
+                currentRole = "select";
+                actions = ["select"];
+                break;
+
+              default:
+                continue;
+            }
+
+            // 5. Filter by requested role
+            if (options.role && currentRole !== options.role) {
+              continue;
+            }
+
+            // 6. Get useful identifying information
+            const ariaLabel = element.getAttribute("aria-label")?.trim() || "";
+
+            const placeholder =
+              element.getAttribute("placeholder")?.trim() || "";
+
+            const title = element.getAttribute("title")?.trim() || "";
+
+            const nameAttribute = element.getAttribute("name")?.trim() || "";
+
+            const text = (element.textContent ?? "")
+              .replace(/\s+/g, " ")
+              .trim()
+              .slice(0, 100);
+
+            // 7. Reject garbage-looking text
+            const looksLikeCode =
+              text.includes("{") ||
+              text.includes("}") ||
+              text.includes("display:") ||
+              text.includes("position:") ||
+              text.includes("var(--") ||
+              text.includes("cubic-bezier") ||
+              text.length > 100;
+
+            const cleanText = looksLikeCode ? "" : text;
+
+            // 8. Choose name
+            const name =
+              ariaLabel || placeholder || title || cleanText || nameAttribute;
+
+            if (!name) continue;
+
+            // 9. Create element ID
+            const elementId = `e${results.length + 1}`;
+
+            element.setAttribute("data-nova-element-id", elementId);
+
+            const browserElement: BrowserElement = {
+              id: elementId,
+              role: currentRole,
+              name,
+              actions,
+            };
+
+            // 10. Add URL for links
+            if (element instanceof HTMLAnchorElement) {
+              browserElement.url = element.href;
+            }
+
+            results.push(browserElement);
+
+            // 11. Stop once limit is reached
+            if (results.length >= options.limit) {
+              break;
+            }
           }
 
-          // 5. Get useful identifying information
-          const ariaLabel = element.getAttribute("aria-label")?.trim() || "";
-
-          const placeholder = element.getAttribute("placeholder")?.trim() || "";
-
-          const title = element.getAttribute("title")?.trim() || "";
-
-          const nameAttribute = element.getAttribute("name")?.trim() || "";
-
-          // Only take visible text from the element.
-          const text = (element.textContent ?? "")
-            .replace(/\s+/g, " ")
-            .trim()
-            .slice(0, 100);
-
-          // 6. Reject CSS / JS / garbage-looking text
-          const looksLikeCode =
-            text.includes("{") ||
-            text.includes("}") ||
-            text.includes("display:") ||
-            text.includes("position:") ||
-            text.includes("var(--") ||
-            text.includes("cubic-bezier") ||
-            text.length > 100;
-
-          const cleanText = looksLikeCode ? "" : text;
-
-          // 7. Choose the best human-readable name
-          const name =
-            ariaLabel || placeholder || title || cleanText || nameAttribute;
-
-          // 8. Ignore elements that have no useful identity
-          if (!name) continue;
-
-          const browserElement: BrowserElement = {
-            id: `e${results.length + 1}`,
-            role,
-            name,
-            actions,
-          };
-
-          // 9. Add URL only for links
-          if (element instanceof HTMLAnchorElement) {
-            browserElement.url = element.href;
-          }
-
-          results.push(browserElement);
-        }
-
-        return results;
-      });
+          return results;
+        },
+        {
+          role,
+          limit,
+        },
+      );
   }
+  async goBack(tabId: string): Promise<void> {
+  const tab = this.getTab(tabId);
+
+  await tab.page.goBack();
+}
 }

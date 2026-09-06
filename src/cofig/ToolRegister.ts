@@ -8,6 +8,7 @@ import { BrowserNavigateTool } from "../tools/browser/BrowserNavigateTool.js";
 import { BrowserClickTool } from "../tools/browser/BrowserClickTool.js";
 import { BrowserFillTool } from "../tools/browser/BrowserFillTool.js";
 import { BrowserPressTool } from "../tools/browser/BrowserPressTool.js";
+import { BrowserGoBackTool } from "../tools/browser/BrowserGoBackTool.js";
 
 export function setupBrowserTools(
   registry: ToolRegistry,
@@ -35,5 +36,8 @@ export function setupBrowserTools(
 
   registry.register(
     new BrowserPressTool(browserManager)
+  );
+  registry.register(
+    new BrowserGoBackTool(browserManager)
   );
 }
