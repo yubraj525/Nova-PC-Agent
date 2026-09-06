@@ -90,7 +90,7 @@
 //   console.error(error);
 // });
 
-import { BrowserManager } from "./tools/OpenBrowserTool.js";
+import { BrowserManager } from "./browser/browserManager.js";
 async function main() {
   console.log("Starting NOVA PC Agent...");
 
