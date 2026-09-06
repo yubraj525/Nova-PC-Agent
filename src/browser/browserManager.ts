@@ -12,6 +12,7 @@ export class BrowserManager {
   private context: BrowserContext | null = null;
 
   private tabs = new Map<string, ManagedTab>();
+  private activeTabId: string | null = null;
 
   async start(): Promise<void> {
     if (this.browser) {
@@ -443,8 +444,26 @@ export class BrowserManager {
       );
   }
   async goBack(tabId: string): Promise<void> {
-  const tab = this.getTab(tabId);
+    const tab = this.getTab(tabId);
 
-  await tab.page.goBack();
-}
+    await tab.page.goBack();
+  }
+  async switchTab(tabId: string): Promise<void> {
+    const tab = this.getTab(tabId);
+
+    await tab.page.bringToFront();
+
+    this.activeTabId = tabId;
+  }
+  async closeTab(tabId: string): Promise<void> {
+    const tab = this.getTab(tabId);
+
+    await tab.page.close();
+
+    this.tabs.delete(tabId);
+
+    if (this.activeTabId === tabId) {
+      this.activeTabId = null;
+    }
+  }
 }

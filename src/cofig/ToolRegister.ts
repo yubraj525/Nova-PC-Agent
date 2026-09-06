@@ -9,6 +9,8 @@ import { BrowserClickTool } from "../tools/browser/BrowserClickTool.js";
 import { BrowserFillTool } from "../tools/browser/BrowserFillTool.js";
 import { BrowserPressTool } from "../tools/browser/BrowserPressTool.js";
 import { BrowserGoBackTool } from "../tools/browser/BrowserGoBackTool.js";
+import { BrowserCloseTabTool } from "../tools/browser/BrowserCloseTabTool.js";
+import { BrowserSwitchTabTool } from "../tools/browser/BrowserSwitchTab.js";
 
 export function setupBrowserTools(
   registry: ToolRegistry,
@@ -39,5 +41,11 @@ export function setupBrowserTools(
   );
   registry.register(
     new BrowserGoBackTool(browserManager)
+  );
+  registry.register(
+    new BrowserCloseTabTool(browserManager)
+  );
+  registry.register(
+    new BrowserSwitchTabTool(browserManager)
   );
 }
