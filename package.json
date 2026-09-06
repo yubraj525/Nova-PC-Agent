@@ -12,6 +12,7 @@
   "license": "ISC",
   "packageManager": "pnpm@10.29.3",
   "dependencies": {
+    "playwright": "^1.63.0",
     "ws": "^8.21.3"
   },
   "devDependencies": {

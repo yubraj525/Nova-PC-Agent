@@ -1,7 +1,8 @@
 import { ProcessManager } from "../process/ProcessManager";
 import { applications } from "../cofig/applicationRegistry";
+import { Tools } from "../core/Tools";
 
-export class OpenApplicationTool {
+export class OpenApplicationTool implements Tools {
 
     name = "open_application";
 

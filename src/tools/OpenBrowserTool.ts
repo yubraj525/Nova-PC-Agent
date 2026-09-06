@@ -1,25 +1,412 @@
-import { spawn } from "child_process";
+import { chromium, Browser, BrowserContext, Page } from "playwright";
+import crypto from "crypto";
 
-export class OpenBrowserTool {
-    name = "open_browser";
+import type {
+  BrowserElement,
+  BrowserTabInfo,
+  ManagedTab,
+} from "../cofig/types";
 
-    description = "Open a web browser.";
+export class BrowserManager {
+  private browser: Browser | null = null;
+  private context: BrowserContext | null = null;
 
-    async execute(args: { url?: string }) {
-        const url = args.url ?? "https://www.google.com";
+  private tabs = new Map<string, ManagedTab>();
 
-        const child = spawn("start", ["", url], {
-            shell: true,
-            detached: true,
-            stdio: "ignore",
-        });
-
-        child.unref();
-
-        return {
-            success: true,
-            url,
-            pid: child.pid,
-        };
+  async start(): Promise<void> {
+    if (this.browser) {
+      return;
     }
+
+    this.browser = await chromium.launch({
+      headless: false,
+    });
+
+    this.context = await this.browser.newContext();
+
+    this.context.on("page", (page) => {
+      void this.registerPage(page);
+    });
+
+    const page = await this.context.newPage();
+
+    await this.registerPage(page);
+
+    console.log("Browser started");
+  }
+
+  async stop(): Promise<void> {
+    if (!this.browser) {
+      return;
+    }
+
+    await this.browser.close();
+
+    this.tabs.clear();
+
+    this.browser = null;
+    this.context = null;
+
+    console.log("Browser stopped");
+  }
+
+  private async registerPage(
+    page: Page,
+    openerTabId?: string,
+  ): Promise<string> {
+    const existing = this.findTabByPage(page);
+
+    if (existing) {
+      return existing.info.id;
+    }
+
+    const id = crypto.randomUUID();
+
+    const info: BrowserTabInfo = {
+      id,
+      url: page.url(),
+      title: await this.getPageTitle(page),
+      openerTabId,
+      createdAt: Date.now(),
+      lastUpdatedAt: Date.now(),
+      isClosed: false,
+    };
+
+    const tab: ManagedTab = {
+      info,
+      page,
+    };
+
+    this.tabs.set(id, tab);
+
+    this.attachPageListeners(id, page);
+
+    console.log(`[Browser] registered tab ${id} | ${info.url}`);
+
+    return id;
+  }
+
+  private attachPageListeners(tabId: string, page: Page): void {
+    page.on("framenavigated", async (frame) => {
+      if (frame !== page.mainFrame()) {
+        return;
+      }
+
+      await this.updateTabInfo(tabId);
+    });
+
+    page.on("close", () => {
+      const tab = this.tabs.get(tabId);
+
+      if (!tab) {
+        return;
+      }
+
+      tab.info.isClosed = true;
+
+      this.tabs.delete(tabId);
+
+      console.log(`[Browser] tab closed ${tabId}`);
+    });
+  }
+
+  private async updateTabInfo(tabId: string): Promise<void> {
+    const tab = this.tabs.get(tabId);
+
+    if (!tab) {
+      return;
+    }
+
+    tab.info.url = tab.page.url();
+    tab.info.title = await this.getPageTitle(tab.page);
+    tab.info.lastUpdatedAt = Date.now();
+  }
+
+  private async getPageTitle(page: Page): Promise<string> {
+    try {
+      return await page.title();
+    } catch {
+      return "";
+    }
+  }
+
+  private findTabByPage(page: Page): ManagedTab | undefined {
+    for (const tab of this.tabs.values()) {
+      if (tab.page === page) {
+        return tab;
+      }
+    }
+
+    return undefined;
+  }
+
+  private getTab(tabId: string): ManagedTab {
+    const tab = this.tabs.get(tabId);
+
+    if (!tab) {
+      throw new Error(`Unknown tab: ${tabId}`);
+    }
+
+    if (tab.page.isClosed()) {
+      throw new Error(`Tab ${tabId} is already closed`);
+    }
+
+    return tab;
+  }
+
+  async openTab(url?: string): Promise<BrowserTabInfo> {
+    if (!this.context) {
+      throw new Error("Browser is not started");
+    }
+
+    const page = await this.context.newPage();
+
+    const tabId = await this.registerPage(page);
+
+    if (url) {
+      await page.goto(url, {
+        waitUntil: "domcontentloaded",
+      });
+
+      await this.updateTabInfo(tabId);
+    }
+
+    return this.getTab(tabId).info;
+  }
+  async navigateTab(tabId: string, url: string): Promise<BrowserTabInfo> {
+    const tab = this.getTab(tabId);
+
+    await tab.page.goto(url, {
+      waitUntil: "domcontentloaded",
+    });
+
+    await this.updateTabInfo(tabId);
+
+    return tab.info;
+  }
+
+  async fillInput(
+    tabId: string,
+    selector: string,
+    value: string,
+  ): Promise<void> {
+    const tab = this.getTab(tabId);
+
+    const input = tab.page.locator(selector);
+
+    await input.waitFor({
+      state: "visible",
+    });
+
+    await input.fill(value);
+  }
+
+  async pressKeyOn(
+    tabId: string,
+    selector: string,
+    key: string,
+  ): Promise<void> {
+    const tab = this.getTab(tabId);
+
+    const element = tab.page.locator(selector);
+
+    await element.waitFor({
+      state: "visible",
+    });
+
+    await element.press(key);
+  }
+
+  async click(tabId: string, selector: string): Promise<void> {
+    const tab = this.getTab(tabId);
+
+    await tab.page.locator(selector).click();
+  }
+
+  async getPageText(tabId: string): Promise<string> {
+    const tab = this.getTab(tabId);
+
+    return await tab.page.locator("body").innerText();
+  }
+  async getVideoResults(
+    tabId: string,
+    limit: number = 20,
+  ): Promise<
+    Array<{
+      title: string;
+      url: string;
+    }>
+  > {
+    const tab = this.getTab(tabId);
+
+    const results = await tab.page
+      .locator('a[href^="/watch"]')
+      .evaluateAll((links) => {
+        return links.map((link) => ({
+          title: (link.textContent ?? "").trim(),
+          url: (link as HTMLAnchorElement).href,
+        }));
+      });
+
+    const unique = new Map<
+      string,
+      {
+        title: string;
+        url: string;
+      }
+    >();
+
+    for (const result of results) {
+      if (!result.title) {
+        continue;
+      }
+
+      if (!unique.has(result.url)) {
+        unique.set(result.url, result);
+      }
+    }
+
+    return Array.from(unique.values()).slice(0, limit);
+  }
+
+  async openVideoResult(
+    tabId: string,
+    results: Array<{
+      title: string;
+      url: string;
+    }>,
+    index: number,
+  ): Promise<BrowserTabInfo> {
+    if (index < 0 || index >= results.length) {
+      throw new Error(`Invalid result index: ${index}`);
+    }
+
+    const result = results[index];
+
+    console.log(`[Browser] Opening result ${index + 1}: ${result.title}`);
+
+    return await this.navigateTab(tabId, result.url);
+  }
+  async getInteractiveElements(tabId: string): Promise<BrowserElement[]> {
+    const tab = this.getTab(tabId);
+
+    return await tab.page
+      .locator("a, button, input, textarea, select")
+      .evaluateAll((elements) => {
+        const results: BrowserElement[] = [];
+
+        for (const element of elements) {
+          const rect = element.getBoundingClientRect();
+          const style = window.getComputedStyle(element);
+
+          // 1. Ignore invisible elements
+          const visible =
+            rect.width > 0 &&
+            rect.height > 0 &&
+            style.display !== "none" &&
+            style.visibility !== "hidden" &&
+            style.opacity !== "0";
+
+          if (!visible) continue;
+
+          // 2. Ignore disabled elements
+          const disabled =
+            element instanceof HTMLButtonElement ||
+            element instanceof HTMLInputElement ||
+            element instanceof HTMLSelectElement ||
+            element instanceof HTMLTextAreaElement
+              ? element.disabled
+              : false;
+
+          if (disabled) continue;
+
+          const tag = element.tagName.toLowerCase();
+
+          // 3. Ignore file inputs for now
+          if (element instanceof HTMLInputElement && element.type === "file") {
+            continue;
+          }
+
+          // 4. Determine role
+          let role: BrowserElement["role"];
+          let actions: string[];
+
+          switch (tag) {
+            case "a":
+              role = "link";
+              actions = ["click"];
+              break;
+
+            case "button":
+              role = "button";
+              actions = ["click"];
+              break;
+
+            case "input":
+            case "textarea":
+              role = "textbox";
+              actions = ["fill", "press"];
+              break;
+
+            case "select":
+              role = "select";
+              actions = ["select"];
+              break;
+
+            default:
+              continue;
+          }
+
+          // 5. Get useful identifying information
+          const ariaLabel = element.getAttribute("aria-label")?.trim() || "";
+
+          const placeholder = element.getAttribute("placeholder")?.trim() || "";
+
+          const title = element.getAttribute("title")?.trim() || "";
+
+          const nameAttribute = element.getAttribute("name")?.trim() || "";
+
+          // Only take visible text from the element.
+          const text = (element.textContent ?? "")
+            .replace(/\s+/g, " ")
+            .trim()
+            .slice(0, 100);
+
+          // 6. Reject CSS / JS / garbage-looking text
+          const looksLikeCode =
+            text.includes("{") ||
+            text.includes("}") ||
+            text.includes("display:") ||
+            text.includes("position:") ||
+            text.includes("var(--") ||
+            text.includes("cubic-bezier") ||
+            text.length > 100;
+
+          const cleanText = looksLikeCode ? "" : text;
+
+          // 7. Choose the best human-readable name
+          const name =
+            ariaLabel || placeholder || title || cleanText || nameAttribute;
+
+          // 8. Ignore elements that have no useful identity
+          if (!name) continue;
+
+          const browserElement: BrowserElement = {
+            id: `e${results.length + 1}`,
+            role,
+            name,
+            actions,
+          };
+
+          // 9. Add URL only for links
+          if (element instanceof HTMLAnchorElement) {
+            browserElement.url = element.href;
+          }
+
+          results.push(browserElement);
+        }
+
+        return results;
+      });
+  }
 }
