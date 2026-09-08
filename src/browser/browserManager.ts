@@ -19,9 +19,10 @@ export class BrowserManager {
       return;
     }
 
-    this.browser = await chromium.launch({
-      headless: false,
-    });
+   this.browser = await chromium.launch({
+    executablePath: "/usr/bin/brave-browser",
+    headless: false,
+});
 
     this.context = await this.browser.newContext();
 
