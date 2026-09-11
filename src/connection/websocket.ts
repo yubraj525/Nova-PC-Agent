@@ -1,57 +1,65 @@
 import WebSocket from "ws";
+import { ToolRegistry } from "../core/toolsregistry";
 
 export class MasterConnection {
+  private ws: WebSocket;
 
-    private ws?: WebSocket;
+  constructor(
+    private serverUrl: string,
+    private clientId: string,
+    private toolRegistry: ToolRegistry,
+  ) {
+    this.ws = new WebSocket(serverUrl);
 
-    connect(): void {
+    this.ws.on("open", () => {
+      console.log("[MASTER] Connected");
+      this.register();
+    });
 
-        this.ws = new WebSocket(
-            "http:/10.0.3.1:8080"
-        );
+    this.ws.on("message", (data) => {
+      this.handleMessage(data.toString());
+    });
 
-        this.ws.on("open", () => {
+    this.ws.on("close", () => {
+      console.log("[MASTER] Disconnected");
+    });
 
-            console.log(
-                "Connected to NOVA Master"
-            );
+    this.ws.on("error", (error) => {
+      console.error("[MASTER] Error:", error);
+    });
+  }
 
-            this.register();
-        });
+  private register() {
+    this.send({
+      type: "register",
+      client_type: "pc",
+      client_name: this.clientId, // Changed from client_id to client_name
+    });
 
-        this.ws.on("message", message => {
+    console.log(`[MASTER] Registered as ${this.clientId}`);
+  }
 
-            console.log(
-                "Master:",
-                message.toString()
-            );
-        });
+  private handleMessage(message: string) {
+    const data = JSON.parse(message);
 
-        this.ws.on("close", () => {
-
-            console.log(
-                "Disconnected from NOVA Master"
-            );
-        });
-
-        this.ws.on("error", error => {
-
-            console.error(
-                "Master connection error:",
-                error
-            );
-        });
+    if (data.type === "request_tools") {
+      this.sendTools();
     }
+  }
 
-    private register(): void {
+  private sendTools() {
+    const tools = this.toolRegistry.getToolSchemas();
 
-        this.ws?.send(
-            JSON.stringify({
-                type: "register",
-                agent_id: "linux-pc-01",
-                agent_type: "pc",
-                platform: "linux"
-            })
-        );
-    }
+    this.send({
+      type: "response_tools",
+      client_name: this.clientId,
+      tools,
+    });
+
+    console.log(`[MASTER] Sending ${tools.length} tools`);
+  }
+
+  private send(data: unknown) {
+    this.ws.send(JSON.stringify(data));
+  }
 }
