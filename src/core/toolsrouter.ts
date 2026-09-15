@@ -9,7 +9,7 @@ export class ToolRouter {
   ): Promise<unknown> {
     const tool = this.registry.get(toolName);
 
-    console.log(`[ToolRouter] Tool schema:`, tool);
+    // console.log(`[ToolRouter] Tool schema:`, tool);
 
     return await tool.execute(args);
   }

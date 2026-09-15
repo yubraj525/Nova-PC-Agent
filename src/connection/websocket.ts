@@ -1,6 +1,7 @@
 import WebSocket from "ws";
 import { ToolRegistry } from "../core/toolsregistry";
 import { ToolRouter } from "../core/toolsrouter";
+import { request } from "node:http";
 export class MasterConnection {
   private ws: WebSocket;
 
@@ -56,9 +57,12 @@ export class MasterConnection {
       console.log(`[MASTER] Executing tool: ${tool_name} with args:`, data.arguments);
       this.router.execute(tool_name, data.arguments)
         .then((result) => {
+          console.log(`[MASTER] Tool executed successfully:`, result);
           this.send({
             type: "response_execute_tool",
+            request_id: data.request_id,
             client_name: this.clientId,
+           
             tool_name,
             result,
           });
