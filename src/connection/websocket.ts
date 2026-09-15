@@ -1,6 +1,6 @@
 import WebSocket from "ws";
 import { ToolRegistry } from "../core/toolsregistry";
-
+import { ToolRouter } from "../core/toolsrouter";
 export class MasterConnection {
   private ws: WebSocket;
 
@@ -8,6 +8,7 @@ export class MasterConnection {
     private serverUrl: string,
     private clientId: string,
     private toolRegistry: ToolRegistry,
+    private router: ToolRouter
   ) {
     this.ws = new WebSocket(serverUrl);
 
@@ -27,6 +28,9 @@ export class MasterConnection {
     this.ws.on("error", (error) => {
       console.error("[MASTER] Error:", error);
     });
+    this.ws.on("ping", () => {
+      console.log("[MASTER] Ping received");
+    });
   }
 
   private register() {
@@ -45,6 +49,29 @@ export class MasterConnection {
     if (data.type === "request_tools") {
       this.sendTools();
     }
+    if (data.type === "execute_tool") {
+      console.log(`[MASTER] Received execute_tool request:`, data);
+      const { tool_name, } = data;
+      
+      console.log(`[MASTER] Executing tool: ${tool_name} with args:`, data.arguments);
+      this.router.execute(tool_name, data.arguments)
+        .then((result) => {
+          this.send({
+            type: "response_execute_tool",
+            client_name: this.clientId,
+            tool_name,
+            result,
+          });
+        })
+        .catch((error) => {
+          this.send({
+            type: "response_execute_tool",
+            client_name: this.clientId,
+            tool_name,
+            error: error.message,
+          });
+        });
+    }
   }
 
   private sendTools() {
@@ -57,6 +84,10 @@ export class MasterConnection {
     });
 
     console.log(`[MASTER] Sending ${tools.length} tools`);
+    // const toolschema = this.toolRegistry.getToolSchemas();
+    // for (const tool of toolschema) {
+    //   console.log(tool);
+    // }
   }
 
   private send(data: unknown) {

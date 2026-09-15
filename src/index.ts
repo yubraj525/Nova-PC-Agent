@@ -17,6 +17,9 @@ async function main() {
 
   const processManager = new ProcessManager();
   const browserManager = new BrowserManager();
+  await browserManager.start();
+
+
   
   await processManager.initialize?.();
   
@@ -32,6 +35,7 @@ new MasterConnection(
     "ws://localhost:8080",
     clientId,
     registry,
+    router
 );
 }
 

@@ -1,18 +1,16 @@
 import { ToolRegistry } from "./toolsregistry";
 
 export class ToolRouter {
+  constructor(private registry: ToolRegistry) {}
 
-    constructor(
-        private registry: ToolRegistry
-    ) {}
+  async execute(
+    toolName: string,
+    args: Record<string, unknown>,
+  ): Promise<unknown> {
+    const tool = this.registry.get(toolName);
 
-    async execute(
-        toolName: string,
-        args: Record<string, unknown>
-    ): Promise<unknown> {
+    console.log(`[ToolRouter] Tool schema:`, tool);
 
-        const tool = this.registry.get(toolName);
-
-        return await tool.execute(args);
-    }
+    return await tool.execute(args);
+  }
 }

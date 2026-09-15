@@ -19,10 +19,12 @@ export class BrowserManager {
       return;
     }
 
-   this.browser = await chromium.launch({
-    executablePath: "/usr/bin/brave-browser",
-    headless: false,
-});
+    this.browser = await chromium.launch({
+      // executablePath: "/usr/bin/brave-browser",
+      executablePath:
+        "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
+      headless: false,
+    });
 
     this.context = await this.browser.newContext();
 
@@ -157,6 +159,7 @@ export class BrowserManager {
   }
 
   async openTab(url?: string): Promise<BrowserTabInfo> {
+    this.start();
     if (!this.context) {
       throw new Error("Browser is not started");
     }
